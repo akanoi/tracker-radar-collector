@@ -24,6 +24,7 @@ program
     .option('-m, --mobile', 'emulate a mobile device')
     .option('-p, --proxy-config <host>', 'use an optional proxy configuration')
     .option('-r, --region-code <region>', 'optional 2 letter region code. Used for metadata only.')
+    .option('-b, --browser-url <url>','optional browser url ex. 127.0.0.1:9000')
     .parse(process.argv);
 
 /**
@@ -39,7 +40,7 @@ program
  * @param {string} proxyHost
  * @param {string} regionCode
  */
-async function run(inputUrls, outputPath, verbose, logPath, numberOfCrawlers, dataCollectors, forceOverwrite, filterOutFirstParty, emulateMobile, proxyHost, regionCode) {
+async function run(inputUrls, outputPath, verbose, logPath, numberOfCrawlers, dataCollectors, forceOverwrite, filterOutFirstParty, emulateMobile, proxyHost, regionCode, browserUrl) {
     const logFile = logPath ? fs.createWriteStream(logPath, {flags: 'w'}) : null;
 
     /**
@@ -152,11 +153,12 @@ async function run(inputUrls, outputPath, verbose, logPath, numberOfCrawlers, da
             dataCallback,
             filterOutFirstParty,
             emulateMobile,
-            proxyHost
+            proxyHost,
+            browserUrl
         });
-        log(chalk.green('\n✅ Finished successfully.'));
+        log(chalk.green('\n Finished successfully.'));
     } catch(e) {
-        log(chalk.red('\n🚨 Fatal error.'), e);
+        log(chalk.red('\n Fatal error.'), e);
         fatalError = e;
     }
 
@@ -238,5 +240,5 @@ if (!urls || !program.output) {
         fs.mkdirSync(program.output);
     }
 
-    run(urls, program.output, verbose, program.logFile, program.crawlers || null, dataCollectors, forceOverwrite, filterOutFirstParty, emulateMobile, program.proxyConfig, program.regionCode);
+    run(urls, program.output, verbose, program.logFile, program.crawlers || null, dataCollectors, forceOverwrite, filterOutFirstParty, emulateMobile, program.proxyConfig, program.regionCode, program.browserUrl);
 }

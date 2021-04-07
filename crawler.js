@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 const puppeteer = require('puppeteer');
 const chalk = require('chalk').default;
 const {createTimer} = require('./helpers/timer');
@@ -6,7 +5,7 @@ const wait = require('./helpers/wait');
 const tldts = require('tldts');
 
 const MAX_LOAD_TIME = 30000;//ms
-const MAX_TOTAL_TIME = MAX_LOAD_TIME * 2;//ms
+const MAX_TOTAL_TIME = MAX_LOAD_TIME * 10;//ms
 const EXECUTION_WAIT_TIME = 2500;//ms
 
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36';
@@ -30,8 +29,13 @@ const VISUAL_DEBUG = false;
 /**
  * @param {function(...any):void} log
  * @param {string} proxyHost
+ * @param {string} browserUrl
  */
-function openBrowser(log, proxyHost) {
+function openBrowser(log, proxyHost, browserUrl) {
+    if (browserUrl) {
+        return puppeteer.connect({ browserURL: browserUrl })
+    }
+
     const args = {};
     if (VISUAL_DEBUG) {
         args.headless = false;
@@ -97,19 +101,11 @@ async function getSiteData(context, url, {
         }
     }
 
-    let pageTargetCreated = false;
-
     // initiate collectors for all contexts (main page, web worker, service worker etc.)
     context.on('targetcreated', async target => {
-        // we have already initiated collectors for the main page, so we ignore the first page target
-        if (target.type() === 'page' && !pageTargetCreated) {
-            pageTargetCreated = true;
-            return;
-        }
-
         const timer = createTimer();
         let cdpClient = null;
-        
+
         try {
             cdpClient = await target.createCDPSession();
         } catch (e) {
@@ -146,26 +142,11 @@ async function getSiteData(context, url, {
             return;
         }
 
-        log(`${target.url()} (${target.type()}) context initiated in ${timer.getElapsedTime()}s`);
+        log(`${target.url()} context initiated in ${timer.getElapsedTime()}s`);
     });
 
     // Create a new page in a pristine context.
     const page = await context.newPage();
-
-    // We are creating CDP connection before page target is created, if we create it only after
-    // new target is created we will miss some requests, API calls, etc.
-    const cdpClient = await page.target().createCDPSession();
-
-    const initPageTimer = createTimer();
-    for (let collector of collectors) {
-        try {
-            // eslint-disable-next-line no-await-in-loop
-            await collector.addTarget({url: url.toString(), type: 'page', cdpClient});
-        } catch (e) {
-            log(chalk.yellow(`${collector.id()} failed to attach to page`), chalk.gray(e.message), chalk.gray(e.stack));
-        }
-    }
-    log(`page context initiated in ${initPageTimer.getElapsedTime()}s`);
 
     if (emulateUserAgent) {
         page.setUserAgent(emulateMobile ? MOBILE_USER_AGENT : DEFAULT_USER_AGENT);
@@ -210,7 +191,7 @@ async function getSiteData(context, url, {
     const data = {};
 
     for (let collector of collectors) {
-        const getDataTimer = createTimer();
+        const timer = createTimer();
         try {
             // eslint-disable-next-line no-await-in-loop
             const collectorData = await collector.getData({
@@ -218,7 +199,7 @@ async function getSiteData(context, url, {
                 urlFilter: urlFilter && urlFilter.bind(null, finalUrl)
             });
             data[collector.id()] = collectorData;
-            log(`getting ${collector.id()} data took ${getDataTimer.getElapsedTime()}s`);
+            log(`getting ${collector.id()} data took ${timer.getElapsedTime()}s`);
         } catch (e) {
             log(chalk.yellow(`getting ${collector.id()} data failed`), chalk.gray(e.message), chalk.gray(e.stack));
             data[collector.id()] = null;
@@ -262,12 +243,12 @@ function isThirdPartyRequest(documentUrl, requestUrl) {
 
 /**
  * @param {URL} url
- * @param {{collectors?: import('./collectors/BaseCollector')[], log?: function(...any):void, rank?: number, filterOutFirstParty?: boolean, emulateMobile?: boolean, emulateUserAgent?: boolean, proxyHost?: string, browserContext?: puppeteer.BrowserContext}} options
+ * @param {{collectors?: import('./collectors/BaseCollector')[], log?: function(...any):void, rank?: number, filterOutFirstParty?: boolean, emulateMobile?: boolean, emulateUserAgent?: boolean, proxyHost?: string, browserContext?: puppeteer.BrowserContext, browserUrl?: string}} options
  * @returns {Promise<CollectResult>}
  */
 module.exports = async (url, options) => {
     const log = options.log || (() => {});
-    const browser = options.browserContext ? null : await openBrowser(log, options.proxyHost);
+    const browser = options.browserContext ? null : await openBrowser(log, options.proxyHost, options.browserUrl);
     // Create a new incognito browser context.
     const context = options.browserContext || await browser.createIncognitoBrowserContext();
 
@@ -289,7 +270,12 @@ module.exports = async (url, options) => {
         // only close the browser if it was created here and not debugging
         if (browser && !VISUAL_DEBUG) {
             await context.close();
-            await browser.close();
+
+            if (!options.browserUrl) {
+                await browser.close();
+            } else {
+                await browser.disconnect();
+            }
         }
     }
 
